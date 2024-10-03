@@ -1,0 +1,13 @@
+[Unit]
+Description=Server Daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/server
+Restart=always
+User=your-user
+Group=your-group
+EnvironmentFile=-/etc/default/server
+
+[Install]
+WantedBy=multi-user.target

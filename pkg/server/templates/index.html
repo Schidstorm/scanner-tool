@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner</title>
+    <link rel="stylesheet" href="bootstrap.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="htmx.min.js"></script>
+    <script src="bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+
+    <link rel="icon" href="favicon.png" type="image/png">
+</head>
+<body>
+    <!-- alter for errors -->
+     <div class="alert alert-danger" role="alert" id="error" style="display: none;">
+        <strong>Error:</strong> <span id="error-message"></span>
+    </div>
+    <div class="">
+        <h1>Scanner</h1>
+        <div class="container">
+            <div class="input">
+                <form>
+                    <div class="input-group mb-3">
+                        <button id="scan" class="btn btn-primary" hx-post="/scan" hx-target="#result">🖨</button>
+                        <input id="pdf" name="filename" class="form-control" placeholder="Output PDF filename">
+                        <button id="combine" class="btn btn-primary" hx-post="/combine" hx-target="#result">📚</button>
+                    </div>
+                </form>
+            </div>
+            <div class="output" id="result">
+                {{ range .Paths }}
+                {{ template "preview" . }}
+                {{ end }}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{{- define "preview" -}}
+<div class="preview-item">
+    <div class="preview-header">
+        <button 
+            class="btn btn-danger btn-sm" 
+            hx-delete="/delete/{{ .Pdf }}" 
+            hx-confirm="Are you sure?" 
+            hx-target="closest .preview-item"
+            hx-swap="outerHTML"
+        >
+        ⨯
+        </button>
+    </div>
+    
+    <a href="/file/{{ .Pdf }}" target="_blank" rel="noopener noreferrer">
+        <img src="/file/{{ .Image }}" alt="Image" style="width: 100%; height: auto;">
+    </a>
+</div>
+{{- end -}}
