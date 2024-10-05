@@ -2,15 +2,26 @@
 htmxUrl = https://unpkg.com/htmx.org@latest/dist/
 bootstrapUrl = https://api.github.com/repos/twbs/bootstrap/releases/latest
 scriptsDir = pkg/server/public
+remoteCompileSsh = .remote-compile-ssh.sh
 
-build: update tidy installDependencies
-	go build -o dist/server cmd/server/main.go
+install: installDependencies
+	go install ./cmd/scanner-tool/ && \
+	sudo cp systemd/scanner-tool.service /etc/systemd/system/ && \
+	sudo systemctl daemon-reload && \
+	sudo systemctl enable scanner-tool && \
+	sudo systemctl restart scanner-tool
+
+build: installDependencies
+	go build -o dist/scanner-tool ./cmd/scanner-tool/ 
+
+remoteBuild:
+	bash $(remoteCompileSsh)
 
 tidy:
 	go mod tidy
 
 installDependencies:
-	sudo apt install -y tesseract-ocr libsane-dev
+	sudo apt install -y tesseract-ocr libsane-dev libsane
 
 update: updateHtmx updateBootstrap
 

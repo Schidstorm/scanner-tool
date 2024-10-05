@@ -3,10 +3,10 @@ Description=Server Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/server
+ExecStart=/home/admin/go/bin/scanner-tool --config /etc/scanner-tool/config.yaml
 Restart=always
-User=your-user
-Group=your-group
+User=root
+Group=root
 EnvironmentFile=-/etc/default/server
 
 [Install]

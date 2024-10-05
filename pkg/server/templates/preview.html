@@ -1,19 +1,42 @@
 {{- define "preview" -}}
 <div class="preview-item">
     <div class="preview-header">
-        <button 
-            class="btn btn-danger btn-sm" 
-            hx-delete="/delete/{{ .Pdf }}" 
-            hx-confirm="Are you sure?" 
-            hx-target="closest .preview-item"
-            hx-swap="outerHTML"
-        >
-        ⨯
-        </button>
+        <input type="checkbox" name="selected[{{ .Pdf }}]" class="form-check-input preview-select" autocomplete="off">
+        <div class="preview-actions">
+            <button 
+                class="btn btn-danger btn-sm" 
+                hx-delete="/delete/{{ .Pdf }}" 
+                hx-confirm="Are you sure?" 
+                hx-target="closest .preview-item"
+                hx-swap="outerHTML"
+            >
+            ⨯
+            </button>
+            <a 
+                class="btn btn-secondary btn-sm" 
+                href="/file/{{ .Pdf }}"
+                target="_blank"
+            >
+            🌐
+            </a>
+            <button 
+                class="btn btn-secondary btn-sm" 
+                hx-post="/split/{{ .Pdf }}"
+                hx-target="#result"
+            >
+            S
+            </button>
+            <button 
+                class="btn btn-secondary btn-sm" 
+                hx-post="/refresh/{{ .Pdf }}"
+                hx-target="closest .preview-item"
+                hx-swap="outerHTML"
+            >
+            R
+            </button>
+        </div>
     </div>
     
-    <a href="/file/{{ .Pdf }}" target="_blank" rel="noopener noreferrer">
-        <img src="/file/{{ .Image }}" alt="Image" style="width: 100%; height: auto;">
-    </a>
+    <img src="/file/{{ .Image }}" alt="Image" style="width: 100%; height: auto;">
 </div>
 {{- end -}}

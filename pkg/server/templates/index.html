@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" data-bs-theme="dark">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,29 +13,37 @@
 
     <link rel="icon" href="favicon.png" type="image/png">
 </head>
+
 <body>
-    <!-- alter for errors -->
-     <div class="alert alert-danger" role="alert" id="error" style="display: none;">
-        <strong>Error:</strong> <span id="error-message"></span>
-    </div>
-    <div class="">
-        <h1>Scanner</h1>
-        <div class="container">
-            <div class="input">
+    <main>
+        <div class="body">
+            <canvas id="preview-canvas" class="preview-canvas" width="500" height="500"></canvas>
+            <div class="container">
                 <form>
-                    <div class="input-group mb-3">
-                        <button id="scan" class="btn btn-primary" hx-post="/scan" hx-target="#result">🖨</button>
-                        <input id="pdf" name="filename" class="form-control" placeholder="Output PDF filename">
-                        <button id="combine" class="btn btn-primary" hx-post="/combine" hx-target="#result">📚</button>
+                    <h1>Scanner</h1>
+                    <div class="input">
+                        <div class="input-group mb-3">
+                            <input id="pdf" name="filename" class="form-control" placeholder="Output PDF filename">
+                            <button id="combine" title="Combine" class="btn btn-primary" hx-post="/combine" hx-target="#result">📚</button>
+                            <button class="btn btn-secondary btn-sm" hx-post="/reverseOrder" hx-target="#result">⇄</button>
+                        </div>
+                    </div>
+                    <div class="output" id="result">
+                        {{ range .Paths }}
+                        {{ template "preview" . }}
+                        {{ end }}
                     </div>
                 </form>
             </div>
-            <div class="output" id="result">
-                {{ range .Paths }}
-                {{ template "preview" . }}
-                {{ end }}
+
+
+            <div class="errorBar d-flex flex-column align-items-stretch flex-shrink-0" style="width: 380px;">
+                <div id="errors" class="list-group list-group-flush scrollarea">
+                    
+                </div>
             </div>
         </div>
-    </div>
+    </main>
 </body>
+
 </html>

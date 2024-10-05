@@ -1,0 +1,12 @@
+{{ define "time" }}
+<span data-time="{{ .Unix }}"></span>
+    <script lang="javascript">
+        (function() {
+            const span = document.currentScript.parentElement;
+            const time = span.getAttribute('data-time');
+            const date = new Date(time * 1000);
+            span.innerText = date.toLocaleTimeString();
+        })()
+    </script>
+</span>
+{{ end }}

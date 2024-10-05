@@ -7,14 +7,19 @@ import (
 	"os/signal"
 	"path"
 
-	"github.com/schidstorm/scanner-tool/pkg/scan"
 	"github.com/schidstorm/scanner-tool/pkg/server"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
+type Options struct {
+	Server server.Options `json:"server,inline" yaml:"server,inline"`
+}
+
 func main() {
+	logrus.StandardLogger().Level = logrus.DebugLevel
+
 	cmd := &cobra.Command{
 		Use:   "scanner-tool",
 		Short: "Start the scanner server",
@@ -22,15 +27,14 @@ func main() {
 	}
 
 	cmd.Flags().String("config", "", "Path to the configuration file")
-	cmd.Flags().Bool("fake", false, "run with fake scanner")
 
-	printConfigCmd := &cobra.Command{
-		Use:   "print-config",
+	emptyConfigCmd := &cobra.Command{
+		Use:   "empty-config",
 		Short: "Print the default configuration",
-		Run:   helpInterceptor(printConfig),
+		Run:   helpInterceptor(emptyConfig),
 	}
 
-	cmd.AddCommand(printConfigCmd)
+	cmd.AddCommand(emptyConfigCmd)
 
 	err := cmd.Execute()
 	if err != nil {
@@ -57,8 +61,8 @@ func helpInterceptor(child func(cmd *cobra.Command, args []string)) func(cmd *co
 	}
 }
 
-func printConfig(cmd *cobra.Command, args []string) {
-	var opts server.Options
+func emptyConfig(cmd *cobra.Command, args []string) {
+	var opts Options
 	fmt.Println("JSON:")
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "    ")
@@ -76,9 +80,6 @@ func startServer(cmd *cobra.Command, args []string) {
 	}
 
 	s := server.NewServer(opts)
-	if fake, _ := cmd.Flags().GetBool("fake"); fake {
-		s.WithScanner(scan.NewFakeScanner())
-	}
 
 	s.Start()
 

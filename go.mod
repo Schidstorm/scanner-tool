@@ -25,7 +25,6 @@ require (
 	github.com/geoffgarside/ber v1.1.0 // indirect
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
-	github.com/tjgq/sane v0.0.0-20180903025858-a697b47bd07c
 	golang.org/x/crypto v0.0.0-20200728195943-123391ffb6de // indirect
 	gopkg.in/yaml.v3 v3.0.1
 )

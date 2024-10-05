@@ -21,15 +21,40 @@
 
 .preview-header {
     display: flex;
-    justify-content: end;
+    justify-content: space-between;
     align-items: center;
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
     padding: 3px;
+    pointer-events: none;
 }
 
-.preview-header button {
+.preview-header button, .preview-header a {
     color: white;
+    pointer-events: all;
+}
+
+content {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.body {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.errorBar {
+    max-height: 100vh;
+    overflow: auto;
+}
+
+.preview-canvas {
+    position: absolute;
+    pointer-events: none;
+    z-index: 2;
 }

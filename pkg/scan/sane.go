@@ -1,181 +1,188 @@
 package scan
 
 import (
-	"fmt"
+	"bytes"
+	"errors"
+	"image"
 	"image/png"
-	"io"
-	"strconv"
-	"time"
+	"os"
+	"os/exec"
+	"strings"
 
-	"github.com/tjgq/sane"
+	"github.com/sirupsen/logrus"
 )
 
-var imageEncode = png.Encode
-
-const deviceOpenRetries = 10
-const deviceOpenRetryDelay = 100 * time.Millisecond
+var productName = "DS-C490"
 
 type Options struct {
 	SaneOptions []string
 }
 
 type SaneScanner struct {
-	deviceName string
-	options    Options
+	options      Options
+	activeDevice string
 }
 
 func NewScanner(opts Options) *SaneScanner {
-	return &SaneScanner{
+	s := &SaneScanner{
 		options: opts,
 	}
+
+	return s
 }
 
-func (s *SaneScanner) Scan(outputImage io.Writer) error {
-	c, err := s.retryOpenDevice()
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	if err := parseOptions(c, s.options.SaneOptions); err != nil {
-		return err
-	}
-
-	img, err := c.ReadImage()
-	if err != nil {
-		return err
-	}
-
-	if err := imageEncode(outputImage, img); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (s *SaneScanner) rescanDeviceName() error {
-	devs, err := listDevices()
-	if err != nil {
-		return err
-	}
-	if len(devs) == 0 {
-		return fmt.Errorf("no devices available")
-	}
-	s.deviceName = devs[0]
-	return nil
-}
-
-func (s *SaneScanner) getDeviceName() (string, error) {
-	if s.deviceName == "" {
-		err := s.rescanDeviceName()
+func (s *SaneScanner) Scan() ([]string, error) {
+	if s.activeDevice == "" {
+		device, err := detectDeviceByProductName(productName)
 		if err != nil {
-			return "", err
-		}
-	}
-	return s.deviceName, nil
-}
-
-func (s *SaneScanner) retryOpenDevice() (*sane.Conn, error) {
-	var c *sane.Conn
-
-	err := retry(func() error {
-		deviceName, err := s.getDeviceName()
-		if err != nil {
-			return err
+			return nil, err
 		}
 
-		c, err = sane.Open(deviceName)
-		if err != nil {
-			s.rescanDeviceName()
-		}
-
-		return err
-	}, deviceOpenRetries, deviceOpenRetryDelay)
-
-	return c, err
-}
-
-func retry(f func() error, retries int, delay time.Duration) error {
-	for i := 0; i < retries; i++ {
-		if err := f(); err == nil {
-			return nil
-		}
-
-		time.Sleep(delay)
+		s.activeDevice = device
 	}
 
-	return fmt.Errorf("failed after %d tries", retries)
-}
-
-func findOption(opts []sane.Option, name string) (*sane.Option, error) {
-	for _, o := range opts {
-		if o.Name == name {
-			return &o, nil
-		}
-	}
-	return nil, fmt.Errorf("no such option")
-}
-
-func parseBool(s string) (interface{}, error) {
-	if s == "yes" || s == "true" || s == "1" {
-		return true, nil
-	}
-	if s == "no" || s == "false" || s == "0" {
-		return false, nil
-	}
-	return nil, fmt.Errorf("not a boolean value")
-}
-
-func parseOptions(c *sane.Conn, args []string) error {
-	invalidArg := fmt.Errorf("invalid argument")
-	if len(args)%2 != 0 {
-		return invalidArg // expect option/value pairs
-	}
-	for i := 0; i < len(args); i += 2 {
-		if args[i][0] != '-' || args[i+1][0] == '-' {
-			return invalidArg
-		}
-		o, err := findOption(c.Options(), args[i][1:])
-		if err != nil {
-			return invalidArg // no such option
-		}
-		var v interface{}
-		if o.IsAutomatic && args[i+1] == "auto" {
-			v = sane.Auto // set to auto value
-		} else {
-			switch o.Type {
-			case sane.TypeBool:
-				if v, err = parseBool(args[i+1]); err != nil {
-					return invalidArg // not a bool
-				}
-			case sane.TypeInt:
-				if v, err = strconv.Atoi(args[i+1]); err != nil {
-					return invalidArg // not an int
-				}
-			case sane.TypeFloat:
-				if v, err = strconv.ParseFloat(args[i+1], 64); err != nil {
-					return invalidArg // not a float
-				}
-			case sane.TypeString:
-				v = args[i+1]
-			}
-		}
-		if _, err := c.SetOption(o.Name, v); err != nil {
-			return err // can't set option
-		}
-	}
-	return nil
-}
-
-func listDevices() ([]string, error) {
-	devs, err := sane.Devices()
+	scannedImages, err := s.execScanimage()
 	if err != nil {
 		return nil, err
 	}
 
-	var names []string
-	for _, d := range devs {
-		names = append(names, d.Name)
+	for _, imagePath := range scannedImages {
+		err = mirrorImageInplace(imagePath)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return names, nil
+
+	return scannedImages, nil
+}
+
+func mirrorImageInplace(imagePath string) error {
+	img, err := loadImage(imagePath)
+	if err != nil {
+		return err
+	}
+
+	resultImage := image.NewRGBA(img.Bounds())
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			resultImage.Set(x, y, img.At(img.Bounds().Dx()-x-1, img.Bounds().Dy()-y-1))
+		}
+	}
+
+	err = saveImage(imagePath, resultImage)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *SaneScanner) execScanimage() ([]string, error) {
+	command := "scanimage"
+	args := []string{"--format", "png", "--resolution", "600dpi", "--duplex=yes", "--batch", "--batch-print", "--device-name", s.activeDevice}
+	logrus.WithField("command", command).WithField("args", args).Info("Executing command")
+
+	cmd := exec.Command(command, args...)
+	imageFilesBuffer := &bytes.Buffer{}
+	cmd.Stdout = imageFilesBuffer
+	stdErrBuffer := &bytes.Buffer{}
+	cmd.Stderr = stdErrBuffer
+	err := cmd.Run()
+	stderr := stdErrBuffer.String()
+	if err != nil {
+		return nil, errors.Join(err, errors.New(stderr))
+	}
+
+	var result []string
+	for _, imagePath := range strings.Split(imageFilesBuffer.String(), "\n") {
+		if imagePath == "" {
+			continue
+		}
+
+		result = append(result, strings.TrimSpace(imagePath))
+	}
+
+	return result, nil
+}
+
+// scanimage --format png --resolution 1200 --duplex=yes --batch --batch-print --device-name epsonscan2:DS-C490:584251413030303218:esci2:usb:ES0264:401
+
+func loadImage(imagePath string) (image.Image, error) {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+
+	return img, nil
+}
+
+func saveImage(imagePath string, img image.Image) error {
+	file, err := os.Create(imagePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	return png.Encode(file, img)
+}
+
+func detectDeviceByProductName(productName string) (string, error) {
+	logrus.WithField("productName", productName).Info("Detecting device by product name")
+	devices, err := detectDevices()
+	if err != nil {
+		return "", err
+	}
+
+	for _, device := range devices {
+		if strings.Contains(device, productName) {
+			return device, nil
+		}
+	}
+
+	return "", errors.New("device not found")
+}
+
+func detectDevices() ([]string, error) {
+	logrus.Info("Detecting devices")
+	// scanimage -L -d epson2
+	deviceListOutput, err := execCommand("scanimage", "-L")
+	if err != nil {
+		logrus.WithError(err).Error("Failed to detect devices")
+	}
+
+	var devices []string
+	for _, line := range strings.Split(deviceListOutput, "\n") {
+		if strings.HasPrefix(line, "device") {
+			deviceName := strings.Split(line, " ")[1]
+			deviceName = removeAllTicks(deviceName)
+			devices = append(devices, deviceName)
+		}
+	}
+
+	return devices, nil
+}
+
+func removeAllTicks(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "'", ""), "`", "")
+}
+
+func execCommand(command string, args ...string) (string, error) {
+	logrus.WithField("command", command).WithField("args", args).Info("Executing command")
+	cmd := exec.Command(command, args...)
+	outputBuffer := &bytes.Buffer{}
+	cmd.Stdout = outputBuffer
+	stderrBuffer := &bytes.Buffer{}
+	cmd.Stderr = stderrBuffer
+	err := cmd.Run()
+	if err != nil {
+		return "", errors.Join(err, errors.New(stderrBuffer.String()))
+	}
+
+	return outputBuffer.String(), nil
 }
