@@ -46,41 +46,12 @@ func (s *SaneScanner) Scan() ([]string, error) {
 		return nil, err
 	}
 
-	for _, imagePath := range scannedImages {
-		err = mirrorImageInplace(imagePath)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return scannedImages, nil
-}
-
-func mirrorImageInplace(imagePath string) error {
-	img, err := loadImage(imagePath)
-	if err != nil {
-		return err
-	}
-
-	resultImage := image.NewRGBA(img.Bounds())
-	for y := 0; y < img.Bounds().Dy(); y++ {
-		for x := 0; x < img.Bounds().Dx(); x++ {
-			resultImage.Set(x, y, img.At(img.Bounds().Dx()-x-1, img.Bounds().Dy()-y-1))
-		}
-	}
-
-	err = saveImage(imagePath, resultImage)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (s *SaneScanner) execScanimage() ([]string, error) {
 	command := "scanimage"
 	args := []string{"--format", "png", "--resolution", "600dpi", "--duplex=yes", "--batch", "--batch-print", "--device-name", s.activeDevice}
-	logrus.WithField("command", command).WithField("args", args).Info("Executing command")
 
 	cmd := exec.Command(command, args...)
 	imageFilesBuffer := &bytes.Buffer{}

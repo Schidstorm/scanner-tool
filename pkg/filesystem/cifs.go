@@ -1,6 +1,8 @@
 package filesystem
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -80,7 +82,6 @@ func (c *Cifs) beginEnsureCifsOpen() {
 						c.closeNoLock()
 						c.cifsOpened = false
 					} else {
-						logrus.Info("CIFS connection is open")
 						c.cifsAccessLock.Unlock()
 						if c.waitOrClose(cifsCheckConnectionDelay) {
 							return
@@ -175,12 +176,19 @@ func (c *Cifs) closeNoLock() error {
 func (c *Cifs) Upload(p string, data []byte) error {
 	return c.accessShare(func(share *smb2.Share) error {
 		logrus.WithField("path", p).Info("Uploading file")
+		return c.UploadReader(p, bytes.NewReader(data))
+	})
+}
+
+func (c *Cifs) UploadReader(p string, r io.Reader) error {
+	return c.accessShare(func(share *smb2.Share) error {
+		logrus.WithField("path", p).Info("Uploading file")
 		f, err := share.Create(path.Join(c.options.BasePath, p))
 		if err != nil {
 			return err
 		}
 		defer f.Close()
-		f.Write(data)
+		_, err = io.Copy(f, r)
 		return err
 	})
 }
@@ -338,4 +346,34 @@ func (c *Cifs) MakeUnique(p string, t time.Time) (string, error) {
 	newPath := strings.Join(parts, ".")
 
 	return newPath, c.RenameFile(p, newPath)
+}
+
+func (c *Cifs) ListZipFiles(zipFile string) ([]string, error) {
+	var result []string
+
+	err := c.accessShare(func(share *smb2.Share) error {
+		zipFile, err := share.Open(path.Join(c.options.BasePath, zipFile))
+		if err != nil {
+			return err
+		}
+		defer zipFile.Close()
+
+		stat, err := zipFile.Stat()
+		if err != nil {
+			return err
+		}
+
+		zipReader, err := zip.NewReader(zipFile, stat.Size())
+		if err != nil {
+			return err
+		}
+
+		for _, file := range zipReader.File {
+			result = append(result, file.Name)
+		}
+
+		return nil
+	})
+
+	return result, err
 }

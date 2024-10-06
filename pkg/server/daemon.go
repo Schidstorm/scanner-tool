@@ -1,27 +1,35 @@
 package server
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"fmt"
+	"archive/zip"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"path"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/schidstorm/scanner-tool/pkg/filequeue"
 	"github.com/schidstorm/scanner-tool/pkg/filesystem"
 	"github.com/schidstorm/scanner-tool/pkg/scan"
 	"github.com/schidstorm/scanner-tool/pkg/tesseract"
 	"github.com/sirupsen/logrus"
 )
 
-var daemonScanWait = 10 * time.Second
-var filePrefix = "zzzzzzz-scan-"
-var todoFolder = path.Join(os.TempDir(), "sscanner-tool-todo")
+var daemonScanWait = 5 * time.Second
+
+var queueScans = filequeue.NewQueue("new-scans")
+var queueRotated = filequeue.NewQueue("new-rotated")
+var queueTesseracted = filequeue.NewQueue("new-tesseracted")
+var queueMerged = filequeue.NewQueue("new-merged")
 
 type DaemonHandler interface {
-	Run() error
+	Run(logger *logrus.Logger) error
 	Close() error
 }
 
@@ -29,6 +37,16 @@ type Daemon struct {
 	closeRequest chan struct{}
 	handlers     []DaemonHandler
 	wgClosed     *sync.WaitGroup
+}
+
+type daemonLogger struct {
+	daemonName string
+	formatter  logrus.Formatter
+}
+
+func (d daemonLogger) Format(entry *logrus.Entry) ([]byte, error) {
+	entry.Data["daemon"] = d.daemonName
+	return d.formatter.Format(entry)
 }
 
 func NewDaemon(handlers []DaemonHandler) *Daemon {
@@ -69,15 +87,23 @@ func (d *Daemon) run(handler DaemonHandler) {
 }
 
 func (d *Daemon) runHandler(handler DaemonHandler) {
+	typeName := reflect.TypeOf(handler).String()
+
+	logger := logrus.New()
+	logger.SetFormatter(daemonLogger{
+		daemonName: typeName,
+		formatter:  logrus.StandardLogger().Formatter,
+	})
+
 	defer func() {
 		if r := recover(); r != nil {
-			logrus.WithField("recover", r).Error("Recovered")
+			logger.WithField("recover", r).Error("Recovered")
 		}
 	}()
 
-	err := handler.Run()
+	err := handler.Run(logger)
 	if err != nil {
-		logrus.WithError(err).Error("Failed to run handler")
+		logger.WithError(err).Error("Failed to run handler")
 	}
 }
 
@@ -91,142 +117,352 @@ func (s *ScanHandler) WithScanner(scanner scan.Scanner) *ScanHandler {
 	return s
 }
 
-func (s *ScanHandler) Run() error {
-	logrus.Info("Scanning")
+func (s *ScanHandler) Run(logger *logrus.Logger) error {
 	imagePaths, err := s.scanner.Scan()
 	if err != nil {
 		return err
 	}
-	logrus.WithField("images", len(imagePaths)).Info("Scanned")
 
-	imageHashes, err := calcFileHashes(imagePaths)
+	if len(imagePaths) == 0 {
+		return nil
+	}
+
+	logger.WithField("images", len(imagePaths)).Info("Scanned")
+
+	tmpZip, err := makeTmpZipFile(imagePaths)
 	if err != nil {
 		return err
 	}
-	logrus.WithField("images", len(imageHashes)).Info("Hashed")
 
-	err = os.MkdirAll(todoFolder, 0755)
-	if err != nil {
-		return err
-	}
-
-	for _, imagePath := range imagePaths {
-		hash := imageHashes[imagePath]
-		todoFileName := fmt.Sprintf("%d_%d_%s_%s", time.Now().Unix(), time.Now().Nanosecond(), path.Base(imagePath), hash)
-		todoPath := path.Join(todoFolder, todoFileName)
-		err = os.Rename(imagePath, todoPath)
-		if err != nil {
-			logrus.WithError(err).Error("Failed to move image to todo folder")
-			continue
-		}
-	}
-	logrus.Info("Moved images to todo folder")
-
+	queueScans.EnqueueFilePath(tmpZip)
 	return nil
 }
 
-func calcFileHashes(files []string) (map[string]string, error) {
-	hashes := make(map[string]string)
-	for _, file := range files {
-		hash, err := calcFileHash(file)
-		if err != nil {
-			return nil, err
-		}
-
-		hashes[file] = hash
-	}
-
-	return hashes, nil
-}
-
-func calcFileHash(file string) (string, error) {
-	data, err := os.ReadFile(file)
+func makeTmpZipFile(contentFiles []string) (string, error) {
+	tmpFile, err := os.CreateTemp("", "scanner-tool-*.zip")
 	if err != nil {
 		return "", err
 	}
+	defer tmpFile.Close()
 
-	hash := sha256.Sum256(data)
-	return fmt.Sprintf("%x", hash), nil
+	err = zipFiles(tmpFile, contentFiles)
+	if err != nil {
+		os.Remove(tmpFile.Name())
+		return "", err
+	}
+
+	return tmpFile.Name(), nil
+}
+
+func zipFiles(zipFile *os.File, contentFiles []string) error {
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	for _, file := range contentFiles {
+		fileReader, err := os.Open(file)
+		if err != nil {
+			return err
+		}
+		defer fileReader.Close()
+
+		fileContent, err := io.ReadAll(fileReader)
+		if err != nil {
+			return err
+		}
+
+		fileWriter, err := zipWriter.Create(path.Base(file))
+		if err != nil {
+			return err
+		}
+
+		_, err = fileWriter.Write(fileContent)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *ScanHandler) Close() error {
 	return nil
 }
 
-type TesseractHandler struct {
-	cifs *filesystem.Cifs
+type ImageMirrorHandler struct {
 }
 
-func (t *TesseractHandler) WithCifs(cifs *filesystem.Cifs) *TesseractHandler {
-	t.cifs = cifs
-
-	return t
-}
-
-func (t *TesseractHandler) Run() error {
-	logrus.Info("Running tesseract")
-	files, err := os.ReadDir(todoFolder)
+func (i *ImageMirrorHandler) Run(logger *logrus.Logger) error {
+	file, err := queueScans.Dequeue()
 	if err != nil {
 		return err
 	}
-	logrus.WithField("files", len(files)).Info("Found files")
-
-	if len(files) == 0 {
+	if file == nil {
 		return nil
 	}
+	defer file.Close()
 
-	firstFile := files[0]
-	f, err := os.Open(path.Join(todoFolder, firstFile.Name()))
+	resultZipFile, err := os.CreateTemp("", "scanner-tool-*.zip")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer os.Remove(resultZipFile.Name())
+	defer resultZipFile.Close()
 
-	pdfBuffer := new(bytes.Buffer)
-	err = tesseract.ConvertImageToPdf(f, pdfBuffer)
+	zipWriter := zip.NewWriter(resultZipFile)
+	defer zipWriter.Close()
+
+	err = forAllFilesInZip(file, func(f *zip.File) error {
+		resultImage := mirrorImage(f)
+		if resultImage == nil {
+			return nil
+		}
+
+		file, err := zipWriter.Create(f.Name)
+		if err != nil {
+			return err
+		}
+
+		err = png.Encode(file, resultImage)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
-		logrus.WithError(err).Error("Failed to convert image to pdf")
 		return err
 	}
 
-	fileId, err := t.cifs.NextFileId()
+	defer zipWriter.Close()
+	os.Remove(file.Name())
+	return queueRotated.EnqueueFilePath(resultZipFile.Name())
+}
+
+func forAllFilesInZip(zipFile *os.File, handler func(f *zip.File) error) error {
+	stat, err := zipFile.Stat()
 	if err != nil {
-		logrus.WithError(err).Error("Failed to get next file id")
 		return err
 	}
 
-	pdfPath := fmt.Sprintf("%s%02d.pdf", filePrefix, fileId)
-	pngPath := fmt.Sprintf("%s%02d.png", filePrefix, fileId)
-
-	err = t.cifs.Upload(pdfPath, pdfBuffer.Bytes())
+	zipReader, err := zip.NewReader(zipFile, stat.Size())
 	if err != nil {
-		logrus.WithError(err).Error("Failed to upload pdf")
-		return err
-	}
-	pdfBuffer.Reset()
-
-	f.Seek(0, 0)
-	imgData, err := io.ReadAll(f)
-	if err != nil {
-		logrus.WithError(err).Error("Failed to read image data")
 		return err
 	}
 
-	err = t.cifs.Upload(pngPath, imgData)
-	if err != nil {
-		logrus.WithError(err).Error("Failed to upload image")
-		return err
-	}
+	for _, file := range zipReader.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
 
-	err = os.Remove(path.Join(todoFolder, firstFile.Name()))
-	if err != nil {
-		logrus.WithError(err).Error("Failed to remove file")
-		return err
+		fileReader, err := file.Open()
+		if err != nil {
+			return err
+		}
+		err = handler(file)
+		fileReader.Close()
+		if err != nil {
+			return err
+		}
+
 	}
 
 	return nil
 }
 
+func mirrorImage(f *zip.File) image.Image {
+	fileHandle, err := f.Open()
+	if err != nil {
+		return nil
+	}
+
+	img, err := png.Decode(fileHandle)
+	if err != nil {
+		return nil
+	}
+
+	resultImage := image.NewRGBA(img.Bounds())
+	for y := 0; y < img.Bounds().Dy(); y++ {
+		for x := 0; x < img.Bounds().Dx(); x++ {
+			resultImage.Set(x, y, img.At(img.Bounds().Dx()-x-1, img.Bounds().Dy()-y-1))
+		}
+	}
+	return resultImage
+}
+
+func (i *ImageMirrorHandler) Close() error {
+	return nil
+}
+
+type TesseractHandler struct {
+}
+
+func (t *TesseractHandler) Run(logger *logrus.Logger) error {
+	file, err := queueRotated.Dequeue()
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return nil
+	}
+	defer file.Close()
+
+	resultZipFile, err := os.CreateTemp("", "scanner-tool-*.zip")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(resultZipFile.Name())
+	defer resultZipFile.Close()
+
+	zipWriter := zip.NewWriter(resultZipFile)
+	defer zipWriter.Close()
+	err = forAllFilesInZip(file, func(f *zip.File) error {
+		pdfFile, err := zipWriter.Create(pdfFileName(f.Name))
+		if err != nil {
+			return err
+		}
+
+		fileHandle, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer fileHandle.Close()
+
+		err = tesseract.ConvertImageToPdf(fileHandle, pdfFile)
+		if err != nil {
+			logger.WithError(err).Error("Failed to convert image to pdf")
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	zipWriter.Close()
+	os.Remove(file.Name())
+	return queueTesseracted.EnqueueFilePath(resultZipFile.Name())
+}
+
+func pdfFileName(fileName string) string {
+	return strings.TrimSuffix(fileName, ".png") + ".pdf"
+}
+
 func (t *TesseractHandler) Close() error {
+	return nil
+}
+
+type MergeHandler struct {
+}
+
+func (m *MergeHandler) Run(logger *logrus.Logger) error {
+	file, err := queueTesseracted.Dequeue()
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return nil
+	}
+	defer file.Close()
+
+	var tmpFiles []string
+	defer func() {
+		for _, tmpFile := range tmpFiles {
+			os.Remove(tmpFile)
+		}
+	}()
+
+	err = forAllFilesInZip(file, func(f *zip.File) error {
+		fileHandle, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer fileHandle.Close()
+
+		tmpFile, err := os.CreateTemp("", "scanner-tool-*.pdf")
+		if err != nil {
+			return err
+		}
+		defer tmpFile.Close()
+
+		_, err = io.Copy(tmpFile, fileHandle)
+		if err != nil {
+			return err
+		}
+
+		tmpFiles = append(tmpFiles, tmpFile.Name())
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	tmpMergedFile, err := os.CreateTemp("", "scanner-tool-*.pdf")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpMergedFile.Name())
+	defer tmpMergedFile.Close()
+
+	readers := make([]io.ReadSeeker, 0, len(tmpFiles))
+	defer func() {
+		for _, tmpFile := range readers {
+			if r, ok := tmpFile.(io.Closer); ok {
+				r.Close()
+			}
+		}
+	}()
+
+	for _, tmpFile := range tmpFiles {
+		file, err := os.Open(tmpFile)
+		if err != nil {
+			return err
+		}
+		readers = append(readers, file)
+	}
+
+	err = api.MergeRaw(readers, tmpMergedFile, false, model.NewDefaultConfiguration())
+	if err != nil {
+		return err
+	}
+
+	os.Remove(file.Name())
+	return queueMerged.EnqueueFilePath(tmpMergedFile.Name())
+}
+
+func (m *MergeHandler) Close() error {
+	return nil
+}
+
+type UploadHandler struct {
+	cifs *filesystem.Cifs
+}
+
+func (u *UploadHandler) WithCifs(cifs *filesystem.Cifs) *UploadHandler {
+	u.cifs = cifs
+
+	return u
+}
+
+func (u *UploadHandler) Run(logger *logrus.Logger) error {
+	file, err := queueMerged.Dequeue()
+	if err != nil {
+		return err
+	}
+	if file == nil {
+		return nil
+	}
+	defer file.Close()
+
+	err = u.cifs.UploadReader(path.Base(file.Name())+".pdf", file)
+	if err != nil {
+		return err
+	}
+
+	os.Remove(file.Name())
+	return nil
+}
+
+func (u *UploadHandler) Close() error {
 	return nil
 }
