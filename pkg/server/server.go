@@ -71,11 +71,11 @@ func NewServer(opts Options) *Server {
 	s.scanner = scan.NewScanner(s.options.ScanOptions)
 	s.cifs = filesystem.NewCifs(s.options.CifsOptions)
 	s.daemon = NewDaemon([]DaemonHandler{
-		new(ScanHandler).WithScanner(scan.NewScanner(s.options.ScanOptions)),
+		new(ScanHandler).WithScanner(s.scanner),
 		new(ImageMirrorHandler),
 		new(TesseractHandler),
 		new(MergeHandler),
-		new(UploadHandler).WithCifs(filesystem.NewCifs(s.options.CifsOptions)),
+		new(UploadHandler).WithCifs(s.cifs),
 	})
 
 	return s
