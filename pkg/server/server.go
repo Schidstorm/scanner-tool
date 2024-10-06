@@ -82,6 +82,7 @@ func NewServer(opts Options) *Server {
 }
 
 func (s *Server) Start() error {
+	s.cifs.Start()
 	s.daemon.Start()
 	return nil
 }
