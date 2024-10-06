@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/schidstorm/scanner-tool/pkg/cifs"
+	"github.com/schidstorm/scanner-tool/pkg/filesystem"
 	"github.com/schidstorm/scanner-tool/pkg/scan"
 )
 
@@ -24,7 +24,7 @@ var errNotFound = fmt.Errorf("not found")
 var imageEncoder = png.Encode
 
 type Options struct {
-	CifsOptions cifs.Options
+	CifsOptions filesystem.Options
 	ScanOptions scan.Options
 	HttpOptions HttpOptions
 }
@@ -58,7 +58,7 @@ func (d DocumentPathList) Swap(i, j int) {
 
 type Server struct {
 	scanner scan.Scanner
-	cifs    *cifs.Cifs
+	cifs    *filesystem.Cifs
 	daemon  *Daemon
 	options Options
 }
@@ -71,7 +71,7 @@ func NewServer(opts Options) *Server {
 	}
 
 	s.scanner = scan.NewScanner(s.options.ScanOptions)
-	s.cifs = cifs.NewCifs(s.options.CifsOptions)
+	s.cifs = filesystem.NewCifs(s.options.CifsOptions)
 	s.daemon = NewDaemon([]DaemonHandler{
 		new(ScanHandler).WithScanner(s.scanner),
 		new(TesseractHandler).WithCifs(s.cifs),

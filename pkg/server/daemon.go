@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/schidstorm/scanner-tool/pkg/cifs"
+	"github.com/schidstorm/scanner-tool/pkg/filesystem"
 	"github.com/schidstorm/scanner-tool/pkg/scan"
 	"github.com/schidstorm/scanner-tool/pkg/tesseract"
 	"github.com/sirupsen/logrus"
@@ -154,10 +154,10 @@ func (s *ScanHandler) Close() error {
 }
 
 type TesseractHandler struct {
-	cifs *cifs.Cifs
+	cifs *filesystem.Cifs
 }
 
-func (t *TesseractHandler) WithCifs(cifs *cifs.Cifs) *TesseractHandler {
+func (t *TesseractHandler) WithCifs(cifs *filesystem.Cifs) *TesseractHandler {
 	t.cifs = cifs
 
 	return t

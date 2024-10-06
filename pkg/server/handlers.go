@@ -125,16 +125,17 @@ func (s *Server) postCombine(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
+	err = s.cifs.RenameFile(filePaths[0], strings.TrimSuffix(filename, ".pdf")+".png")
+	if err != nil {
+		return err
+	}
+
 	// delete all pdfs except the combined one
 	for _, p := range filePaths {
 		if p != filename {
 			s.cifs.Delete(p)
+			s.cifs.Delete(strings.TrimSuffix(p, ".pdf") + ".png")
 		}
-	}
-
-	// delete all pngs
-	for _, p := range filePaths {
-		s.cifs.Delete(strings.TrimSuffix(p, ".pdf") + ".png")
 	}
 
 	paths, err := s.listDocuments()

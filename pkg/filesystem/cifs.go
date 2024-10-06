@@ -1,4 +1,4 @@
-package cifs
+package filesystem
 
 import (
 	"encoding/binary"
@@ -278,6 +278,10 @@ func (c *Cifs) SwapFileNames(nameA, nameB string) error {
 }
 
 func (c *Cifs) RenameFile(oldName, newName string) error {
+	if oldName == newName {
+		return nil
+	}
+
 	return c.accessShare(func(share *smb2.Share) error {
 		logrus.WithFields(logrus.Fields{
 			"oldName": oldName,
