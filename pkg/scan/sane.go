@@ -61,6 +61,10 @@ func (s *SaneScanner) execScanimage() ([]string, error) {
 	err := cmd.Run()
 	stderr := stdErrBuffer.String()
 	if err != nil {
+		if strings.Contains(stderr, "Error during device I/O") {
+			// device is turned off
+			return nil, nil
+		}
 		return nil, errors.Join(err, errors.New(stderr))
 	}
 
