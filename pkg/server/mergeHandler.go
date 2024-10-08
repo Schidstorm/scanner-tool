@@ -2,8 +2,12 @@ package server
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"os"
+	"path"
+	"sort"
+	"time"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -14,16 +18,7 @@ import (
 type MergeHandler struct {
 }
 
-func (m *MergeHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *filequeue.Queue) error {
-	file, err := inputQueue.Dequeue()
-	if err != nil {
-		return err
-	}
-	if file == nil {
-		return nil
-	}
-	defer file.Close()
-
+func (m *MergeHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
 	var tmpFiles []string
 	defer func() {
 		for _, tmpFile := range tmpFiles {
@@ -31,14 +26,38 @@ func (m *MergeHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *fileq
 		}
 	}()
 
-	err = forAllFilesInZip(file.File, func(f *zip.File) error {
+	tmpDir, err := os.MkdirTemp("", "scanner-tool-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tmpFiles, err = unpackAllFilesInZip(file, tmpDir)
+	if err != nil {
+		return err
+	}
+
+	tmpMergedFileName := fmt.Sprintf("%d_%d.pdf", time.Now().Unix(), time.Now().Nanosecond())
+	tmpMergedFilePath := path.Join(os.TempDir(), tmpMergedFileName)
+	err = api.MergeCreateFile(tmpFiles, tmpMergedFilePath, false, model.NewDefaultConfiguration())
+	if err != nil {
+		return err
+	}
+
+	return outputQueue.EnqueueFilePath(tmpMergedFilePath)
+}
+
+func unpackAllFilesInZip(zipFile filequeue.QueueFile, destDir string) ([]string, error) {
+	var tmpFiles []string
+	err := forAllFilesInZip(zipFile, func(f *zip.File) error {
 		fileHandle, err := f.Open()
 		if err != nil {
 			return err
 		}
 		defer fileHandle.Close()
 
-		tmpFile, err := os.CreateTemp("", "scanner-tool-*.pdf")
+		tmpFilePath := path.Join(destDir, f.Name)
+		tmpFile, err := os.Create(tmpFilePath)
 		if err != nil {
 			return err
 		}
@@ -49,43 +68,20 @@ func (m *MergeHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *fileq
 			return err
 		}
 
-		tmpFiles = append(tmpFiles, tmpFile.Name())
+		tmpFiles = append(tmpFiles, tmpFilePath)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
-	tmpMergedFile, err := os.CreateTemp("", "scanner-tool-*.pdf")
 	if err != nil {
-		return err
-	}
-	defer os.Remove(tmpMergedFile.Name())
-	defer tmpMergedFile.Close()
-
-	readers := make([]io.ReadSeeker, 0, len(tmpFiles))
-	defer func() {
-		for _, tmpFile := range readers {
-			if r, ok := tmpFile.(io.Closer); ok {
-				r.Close()
-			}
+		for _, tmpFile := range tmpFiles {
+			os.Remove(tmpFile)
 		}
-	}()
-
-	for _, tmpFile := range tmpFiles {
-		file, err := os.Open(tmpFile)
-		if err != nil {
-			return err
-		}
-		readers = append(readers, file)
+		return nil, err
 	}
 
-	err = api.MergeRaw(readers, tmpMergedFile, false, model.NewDefaultConfiguration())
-	if err != nil {
-		return err
-	}
+	sort.Strings(tmpFiles)
 
-	return outputQueue.EnqueueFilePath(tmpMergedFile.Name())
+	return tmpFiles, nil
 }
 
 func (m *MergeHandler) Close() error {

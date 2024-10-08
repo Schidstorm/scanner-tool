@@ -1,7 +1,8 @@
 package server
 
 import (
-	"path"
+	"fmt"
+	"time"
 
 	"github.com/schidstorm/scanner-tool/pkg/filequeue"
 	"github.com/schidstorm/scanner-tool/pkg/filesystem"
@@ -18,22 +19,9 @@ func (u *UploadHandler) WithCifs(cifs *filesystem.Cifs) *UploadHandler {
 	return u
 }
 
-func (u *UploadHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *filequeue.Queue) error {
-	file, err := inputQueue.Dequeue()
-	if err != nil {
-		return err
-	}
-	if file == nil {
-		return nil
-	}
-	defer file.Close()
-
-	err = u.cifs.UploadReader(path.Base(file.Name())+".pdf", file)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func (u *UploadHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
+	fileName := fmt.Sprintf("%d_%d.pdf", time.Now().Unix(), time.Now().Nanosecond())
+	return u.cifs.UploadReader(fileName, file)
 }
 
 func (u *UploadHandler) Close() error {

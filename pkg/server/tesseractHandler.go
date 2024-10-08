@@ -13,16 +13,7 @@ import (
 type TesseractHandler struct {
 }
 
-func (t *TesseractHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *filequeue.Queue) error {
-	file, err := inputQueue.Dequeue()
-	if err != nil {
-		return err
-	}
-	if file == nil {
-		return nil
-	}
-	defer file.Close()
-
+func (t *TesseractHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
 	resultZipFile, err := os.CreateTemp("", "scanner-tool-*.zip")
 	if err != nil {
 		return err
@@ -32,7 +23,7 @@ func (t *TesseractHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *f
 
 	zipWriter := zip.NewWriter(resultZipFile)
 	defer zipWriter.Close()
-	err = forAllFilesInZip(file.File, func(f *zip.File) error {
+	err = forAllFilesInZip(file, func(f *zip.File) error {
 		pdfFile, err := zipWriter.Create(pdfFileName(f.Name))
 		if err != nil {
 			return err

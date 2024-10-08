@@ -21,7 +21,7 @@ func (s *ScanHandler) WithScanner(scanner scan.Scanner) *ScanHandler {
 	return s
 }
 
-func (s *ScanHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *filequeue.Queue) error {
+func (s *ScanHandler) Run(logger *logrus.Logger, _ filequeue.QueueFile, outputQueue filequeue.Queue) error {
 	imagePaths, err := s.scanner.Scan()
 	if err != nil {
 		return err
@@ -31,7 +31,7 @@ func (s *ScanHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *filequ
 		return nil
 	}
 
-	logger.WithField("images", len(imagePaths)).Info("Scanned")
+	logger.WithField("images", len(imagePaths)).WithField("files", imagePaths).Info("Scanned")
 
 	tmpZip, err := makeTmpZipFile(imagePaths)
 	if err != nil {

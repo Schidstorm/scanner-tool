@@ -12,14 +12,16 @@ import (
 var daemonScanWait = 5 * time.Second
 
 type DaemonHandler interface {
-	Run(logger *logrus.Logger, inputQueue, outputQueue *filequeue.Queue) error
+	Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) error
 	Close() error
 }
 
+type QueueFactory func(name string) filequeue.Queue
 type Daemon struct {
 	closeRequest chan struct{}
 	handlers     []DaemonHandler
 	wgClosed     *sync.WaitGroup
+	queueFactory QueueFactory
 }
 
 type daemonLogger struct {
@@ -32,7 +34,7 @@ func (d daemonLogger) Format(entry *logrus.Entry) ([]byte, error) {
 	return d.formatter.Format(entry)
 }
 
-func NewDaemon(handlers []DaemonHandler) *Daemon {
+func NewDaemon(queueFactory QueueFactory, handlers []DaemonHandler) *Daemon {
 	return &Daemon{
 		handlers: handlers,
 		wgClosed: new(sync.WaitGroup),
@@ -43,13 +45,13 @@ func (d *Daemon) Start() error {
 	d.closeRequest = make(chan struct{})
 	d.wgClosed.Add(len(d.handlers))
 
-	outputQueues := make([]*filequeue.Queue, len(d.handlers)-1)
+	outputQueues := make([]filequeue.Queue, len(d.handlers)-1)
 	for i := 0; i < len(d.handlers)-1; i++ {
-		outputQueues[i] = filequeue.NewQueue(handlerName(d.handlers[i]))
+		outputQueues[i] = d.queueFactory(handlerName(d.handlers[i]))
 	}
 
 	for i, handler := range d.handlers {
-		var inputQueue, outputQueue *filequeue.Queue
+		var inputQueue, outputQueue filequeue.Queue
 		if i > 0 {
 			inputQueue = outputQueues[i-1]
 		}
@@ -68,7 +70,7 @@ func (d *Daemon) Stop() error {
 	return nil
 }
 
-func (d *Daemon) run(handler DaemonHandler, inputQueue, outputQueue *filequeue.Queue) {
+func (d *Daemon) run(handler DaemonHandler, inputQueue, outputQueue filequeue.Queue) {
 	for {
 		select {
 		case <-d.closeRequest:
@@ -78,11 +80,25 @@ func (d *Daemon) run(handler DaemonHandler, inputQueue, outputQueue *filequeue.Q
 		case <-time.After(daemonScanWait):
 		}
 
-		d.runHandler(handler, inputQueue, outputQueue)
+		var inputFile filequeue.QueueFile
+		if inputQueue != nil {
+			if p, err := inputQueue.Dequeue(); err == nil {
+				inputFile = p
+				defer p.Close()
+			} else {
+				logrus.WithError(err).Error("Failed to dequeue")
+			}
+		}
+
+		if inputQueue != nil && inputFile == nil {
+			continue
+		}
+
+		d.runHandler(handler, inputFile, outputQueue)
 	}
 }
 
-func (d *Daemon) runHandler(handler DaemonHandler, inputQueue, outputQueue *filequeue.Queue) {
+func (d *Daemon) runHandler(handler DaemonHandler, inputFile filequeue.QueueFile, outputQueue filequeue.Queue) {
 	typeName := handlerName(handler)
 
 	logger := logrus.New()
@@ -97,9 +113,11 @@ func (d *Daemon) runHandler(handler DaemonHandler, inputQueue, outputQueue *file
 		}
 	}()
 
-	err := handler.Run(logger, inputQueue, outputQueue)
+	err := handler.Run(logger, inputFile, outputQueue)
 	if err != nil {
 		logger.WithError(err).Error("Failed to run handler")
+	} else if inputFile != nil {
+		inputFile.Done()
 	}
 }
 

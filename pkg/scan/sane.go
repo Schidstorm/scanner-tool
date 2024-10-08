@@ -51,7 +51,7 @@ func (s *SaneScanner) Scan() ([]string, error) {
 
 func (s *SaneScanner) execScanimage() ([]string, error) {
 	command := "scanimage"
-	args := []string{"--format", "png", "--resolution", "600dpi", "--duplex=yes", "--batch", "--batch-print", "--device-name", s.activeDevice}
+	args := []string{"--format", "png", "--resolution", "600dpi", "--duplex=yes", "--batch=scan-%03d.png", "--batch-print", "--device-name", s.activeDevice}
 
 	cmd := exec.Command(command, args...)
 	imageFilesBuffer := &bytes.Buffer{}

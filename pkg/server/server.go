@@ -1,14 +1,10 @@
 package server
 
 import (
+	"github.com/schidstorm/scanner-tool/pkg/filequeue"
 	"github.com/schidstorm/scanner-tool/pkg/filesystem"
 	"github.com/schidstorm/scanner-tool/pkg/scan"
 )
-
-// var queueScans = filequeue.NewQueue("new-scans")
-// var queueRotated = filequeue.NewQueue("new-rotated")
-// var queueTesseracted = filequeue.NewQueue("new-tesseracted")
-// var queueMerged = filequeue.NewQueue("new-merged")
 
 type Options struct {
 	CifsOptions filesystem.Options
@@ -33,7 +29,7 @@ func NewServer(opts Options) *Server {
 
 	s.scanner = scan.NewScanner(s.options.ScanOptions)
 	s.cifs = filesystem.NewCifs(s.options.CifsOptions)
-	s.daemon = NewDaemon([]DaemonHandler{
+	s.daemon = NewDaemon(queueFactory, []DaemonHandler{
 		new(ScanHandler).WithScanner(s.scanner),
 		new(ImageMirrorHandler),
 		new(TesseractHandler),
@@ -42,6 +38,10 @@ func NewServer(opts Options) *Server {
 	})
 
 	return s
+}
+
+func queueFactory(name string) filequeue.Queue {
+	return filequeue.NewFsQueue(name)
 }
 
 func (s *Server) Start() error {

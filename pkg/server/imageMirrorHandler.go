@@ -13,16 +13,7 @@ import (
 type ImageMirrorHandler struct {
 }
 
-func (i *ImageMirrorHandler) Run(logger *logrus.Logger, inputQueue, outputQueue *filequeue.Queue) error {
-	file, err := inputQueue.Dequeue()
-	if err != nil {
-		return err
-	}
-	if file == nil {
-		return nil
-	}
-	defer file.Close()
-
+func (i *ImageMirrorHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
 	resultZipFile, err := os.CreateTemp("", "scanner-tool-*.zip")
 	if err != nil {
 		return err
@@ -33,7 +24,7 @@ func (i *ImageMirrorHandler) Run(logger *logrus.Logger, inputQueue, outputQueue 
 	zipWriter := zip.NewWriter(resultZipFile)
 	defer zipWriter.Close()
 
-	err = forAllFilesInZip(file.File, func(f *zip.File) error {
+	err = forAllFilesInZip(file, func(f *zip.File) error {
 		resultImage := mirrorImage(f)
 		if resultImage == nil {
 			return nil
@@ -59,13 +50,13 @@ func (i *ImageMirrorHandler) Run(logger *logrus.Logger, inputQueue, outputQueue 
 	return outputQueue.EnqueueFilePath(resultZipFile.Name())
 }
 
-func forAllFilesInZip(zipFile *os.File, handler func(f *zip.File) error) error {
-	stat, err := zipFile.Stat()
+func forAllFilesInZip(zipFile filequeue.QueueFile, handler func(f *zip.File) error) error {
+	fileSize, err := zipFile.Size()
 	if err != nil {
 		return err
 	}
 
-	zipReader, err := zip.NewReader(zipFile, stat.Size())
+	zipReader, err := zip.NewReader(zipFile, fileSize)
 	if err != nil {
 		return err
 	}
