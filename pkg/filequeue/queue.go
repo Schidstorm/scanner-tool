@@ -71,7 +71,7 @@ func ensureDir(dir string) error {
 	return nil
 }
 
-func (q *Queue) Dequeue() (*os.File, error) {
+func (q *Queue) Dequeue() (*RemoveOnCloseFile, error) {
 	dir := baseDir + "/" + q.name
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
@@ -97,5 +97,23 @@ func (q *Queue) Dequeue() (*os.File, error) {
 		return nil, err
 	}
 
-	return file, nil
+	return &RemoveOnCloseFile{File: file}, nil
+}
+
+type RemoveOnCloseFile struct {
+	*os.File
+}
+
+func (f *RemoveOnCloseFile) Close() error {
+	err := f.File.Close()
+	if err != nil {
+		return err
+	}
+
+	err = os.Remove(f.Name())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
