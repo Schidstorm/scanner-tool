@@ -20,12 +20,12 @@ import (
 var filePrefix = "zzzzzzz-scan-"
 
 type Options struct {
-	Username string
-	Password string
-	Hostname string
-	Port     int
-	Share    string
-	BasePath string
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	Hostname string `yaml:"hostname"`
+	Port     int    `yaml:"port"`
+	Share    string `yaml:"share"`
+	BasePath string `yaml:"basepath"`
 }
 
 type Cifs struct {

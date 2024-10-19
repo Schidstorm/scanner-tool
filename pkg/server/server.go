@@ -7,8 +7,8 @@ import (
 )
 
 type Options struct {
-	CifsOptions filesystem.Options
-	ScanOptions scan.Options
+	CifsOptions filesystem.Options `yaml:"cifsoptions"`
+	ScanOptions scan.Options       `yaml:"scanoptions"`
 }
 
 type HttpOptions struct {

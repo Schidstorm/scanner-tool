@@ -15,7 +15,7 @@ import (
 var productName = "DS-C490"
 
 type Options struct {
-	SaneOptions []string
+	SaneOptions []string `yaml:"saneOptions"`
 }
 
 type SaneScanner struct {

@@ -36,8 +36,9 @@ func (d daemonLogger) Format(entry *logrus.Entry) ([]byte, error) {
 
 func NewDaemon(queueFactory QueueFactory, handlers []DaemonHandler) *Daemon {
 	return &Daemon{
-		handlers: handlers,
-		wgClosed: new(sync.WaitGroup),
+		handlers:     handlers,
+		wgClosed:     new(sync.WaitGroup),
+		queueFactory: queueFactory,
 	}
 }
 
@@ -83,6 +84,9 @@ func (d *Daemon) run(handler DaemonHandler, inputQueue, outputQueue filequeue.Qu
 		var inputFile filequeue.QueueFile
 		if inputQueue != nil {
 			if p, err := inputQueue.Dequeue(); err == nil {
+				if p == nil {
+					continue
+				}
 				inputFile = p
 				defer p.Close()
 			} else {
