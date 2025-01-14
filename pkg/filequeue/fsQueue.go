@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/schidstorm/scanner-tool/pkg/logger"
 )
 
@@ -98,13 +99,79 @@ func (q *FsQueue) Dequeue() (QueueFile, error) {
 		return nil, nil
 	}
 
-	files, err := os.ReadDir(dir)
+	filPaths, err := waitUntilSomeFiles(dir)
+	if err != nil || len(filPaths) == 0 {
+		return nil, err
+	}
+
+	file, err := os.Open(filPaths[0])
 	if err != nil {
 		return nil, err
 	}
 
-	if len(files) == 0 {
-		return nil, nil
+	return &fsQueueFile{File: file}, nil
+}
+
+func waitUntilSomeFiles(dir string) ([]string, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
+
+	barrier := make(chan struct{})
+	defer close(barrier)
+
+	// Start listening for events.
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+
+				log.Debugf("event: %v", event)
+				if event.Has(fsnotify.Create) {
+					log.Debugf("file created: %s", event.Name)
+					barrier <- struct{}{}
+					return
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+
+				log.WithError(err).Error("error")
+			}
+		}
+	}()
+
+	err = watcher.Add(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	files := listFiles(dir)
+	if len(files) > 0 {
+		return files, nil
+	}
+
+	<-barrier
+
+	files = listFiles(dir)
+	if len(files) > 0 {
+		return files, nil
+	}
+
+	return nil, nil
+}
+
+func listFiles(dir string) []string {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		log.WithError(err).Warn("Failed to list files")
+		return nil
 	}
 
 	filPaths := make([]string, 0, len(files))
@@ -113,10 +180,5 @@ func (q *FsQueue) Dequeue() (QueueFile, error) {
 	}
 	sort.Strings(filPaths)
 
-	file, err := os.Open(filPaths[0])
-	if err != nil {
-		return nil, err
-	}
-
-	return &fsQueueFile{File: file}, nil
+	return filPaths
 }
