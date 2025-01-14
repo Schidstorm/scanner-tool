@@ -18,7 +18,7 @@ type Options struct {
 }
 
 func main() {
-	logrus.StandardLogger().Level = logrus.DebugLevel
+	logrus.StandardLogger().Level = logrus.InfoLevel
 
 	cmd := &cobra.Command{
 		Use:   "scanner-tool",
@@ -27,6 +27,7 @@ func main() {
 	}
 
 	cmd.Flags().String("config", "", "Path to the configuration file")
+	cmd.MarkFlagRequired("config")
 
 	emptyConfigCmd := &cobra.Command{
 		Use:   "empty-config",

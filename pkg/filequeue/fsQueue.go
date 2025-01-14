@@ -5,7 +5,11 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/schidstorm/scanner-tool/pkg/logger"
 )
+
+var log = logger.Logger(FsQueue{})
 
 type fsQueueFile struct {
 	*os.File
@@ -35,6 +39,7 @@ func NewFsQueue(name string) *FsQueue {
 }
 
 func (q *FsQueue) Enqueue(data []byte) error {
+	log.Debugf("Enqueueing data to queue %s", q.name)
 	dir := baseDir + "/" + q.name
 	err := ensureDir(dir)
 	if err != nil {
@@ -58,6 +63,7 @@ func (q *FsQueue) Enqueue(data []byte) error {
 }
 
 func (q *FsQueue) EnqueueFilePath(existingFilePath string) error {
+	log.Debugf("Enqueueing file to queue %s", q.name)
 	dir := baseDir + "/" + q.name
 	err := ensureDir(dir)
 	if err != nil {
@@ -86,6 +92,7 @@ func ensureDir(dir string) error {
 }
 
 func (q *FsQueue) Dequeue() (QueueFile, error) {
+	log.Debugf("Dequeueing file from queue %s", q.name)
 	dir := baseDir + "/" + q.name
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil

@@ -24,24 +24,17 @@ func (t *TesseractHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, 
 	zipWriter := zip.NewWriter(resultZipFile)
 	defer zipWriter.Close()
 	err = forAllFilesInZip(file, func(f *zip.File) error {
-		pdfFile, err := zipWriter.Create(pdfFileName(f.Name))
+		text, err := fileToText(f)
 		if err != nil {
 			return err
 		}
 
-		fileHandle, err := f.Open()
-		if err != nil {
-			return err
-		}
-		defer fileHandle.Close()
-
-		err = tesseract.ConvertImageToPdf(fileHandle, pdfFile)
-		if err != nil {
-			logger.WithError(err).Error("Failed to convert image to pdf")
-			return err
+		if strings.Trim(text, " \n") == "" {
+			logger.Info("No text found in image. Skipping pdf conversion")
+			return nil
 		}
 
-		return nil
+		return fileToPdf(f, zipWriter)
 	})
 	if err != nil {
 		return err
@@ -49,6 +42,31 @@ func (t *TesseractHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, 
 
 	zipWriter.Close()
 	return outputQueue.EnqueueFilePath(resultZipFile.Name())
+}
+
+func fileToText(zipFile *zip.File) (string, error) {
+	fileHandle, err := zipFile.Open()
+	if err != nil {
+		return "", err
+	}
+	defer fileHandle.Close()
+
+	return tesseract.ConvertImageToText(fileHandle)
+}
+
+func fileToPdf(zipFile *zip.File, zipWriter *zip.Writer) error {
+	fileHandle, err := zipFile.Open()
+	if err != nil {
+		return err
+	}
+	defer fileHandle.Close()
+
+	pdfWriter, err := zipWriter.Create(pdfFileName(zipFile.Name))
+	if err != nil {
+		return err
+	}
+
+	return tesseract.ConvertImageToPdf(fileHandle, pdfWriter)
 }
 
 func pdfFileName(fileName string) string {

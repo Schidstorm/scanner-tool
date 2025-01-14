@@ -24,3 +24,20 @@ func ConvertImageToPdf(inputImage io.Reader, output io.Writer) error {
 
 	return nil
 }
+
+func ConvertImageToText(inputImage io.Reader) (string, error) {
+	logrus.Info("Converting image to text")
+	cmd := exec.Command("tesseract", "-", "-")
+	cmd.Stdin = inputImage
+	outputBuffer := &bytes.Buffer{}
+	cmd.Stdout = outputBuffer
+	errorBuffer := &bytes.Buffer{}
+	cmd.Stderr = errorBuffer
+	err := cmd.Run()
+
+	if err != nil {
+		return "", errors.Join(err, errors.New(errorBuffer.String()))
+	}
+
+	return outputBuffer.String(), nil
+}
