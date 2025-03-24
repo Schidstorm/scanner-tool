@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -128,7 +129,7 @@ func (c *Cifs) waitOrClose(duration time.Duration) (close bool) {
 
 func (c *Cifs) openSingle() error {
 	var err error
-	c.connection, err = net.Dial("tcp", fmt.Sprintf("%s:%d", c.options.Hostname, c.options.Port))
+	c.connection, err = net.Dial("tcp", net.JoinHostPort(c.options.Hostname, strconv.Itoa(c.options.Port)))
 	if err != nil {
 		return err
 	}
