@@ -18,6 +18,7 @@ import (
 )
 
 var filePrefix = "zzzzzzz-scan-"
+var lopSecurity = 1000
 
 type Options struct {
 	Username string `yaml:"username"`
@@ -174,21 +175,44 @@ func (c *Cifs) closeNoLock() error {
 }
 
 func (c *Cifs) Upload(p string, data []byte) error {
-	return c.accessShare(func(share *smb2.Share) error {
-		logrus.WithField("path", p).Info("Uploading file")
-		return c.UploadReader(p, bytes.NewReader(data))
-	})
+	return c.UploadReader(p, bytes.NewReader(data))
 }
 
 func (c *Cifs) UploadReader(p string, r io.Reader) error {
+	filePathFunc := func(n int) string {
+		fileName := path.Base(p)
+		fileNameWithoutExt := strings.TrimSuffix(fileName, path.Ext(fileName))
+
+		if n > 0 {
+			fileName = fmt.Sprintf("%s-%d%s", fileNameWithoutExt, n, path.Ext(fileName))
+		}
+
+		return path.Join(c.options.BasePath, fileName)
+	}
+
 	return c.accessShare(func(share *smb2.Share) error {
-		logrus.WithField("path", p).Info("Uploading file")
-		f, err := share.Create(path.Join(c.options.BasePath, p))
+		var filePath string
+		for i := range lopSecurity {
+			filePath = filePathFunc(i)
+			_, err := share.Stat(filePath)
+			if err != nil {
+				break
+			} else {
+				logrus.WithField("path", filePath).WithError(err).Error("File already exists")
+			}
+		}
+
+		logrus.WithField("path", filePath).Info("Uploading file")
+
+		f, err := share.Create(filePath)
 		if err != nil {
 			return err
 		}
 		defer f.Close()
 		_, err = io.Copy(f, r)
+		if err != nil {
+			logrus.WithField("path", filePath).Info("File upload completed")
+		}
 		return err
 	})
 }
@@ -262,10 +286,11 @@ func (c *Cifs) Delete(paths ...string) error {
 func (c *Cifs) accessShare(handler func(share *smb2.Share) error) error {
 	for {
 		c.cifsAccessLock.Lock()
-		defer c.cifsAccessLock.Unlock()
 		if c.cifsOpened {
+			defer c.cifsAccessLock.Unlock()
 			return handler(c.share)
 		}
+		c.cifsAccessLock.Unlock()
 		time.Sleep(cifsOpenRetryDelay)
 	}
 }

@@ -1,16 +1,19 @@
 package server
 
 import (
-	"fmt"
-	"time"
+	"bytes"
+	"io"
+	"os/exec"
 
+	"github.com/schidstorm/scanner-tool/pkg/ai"
 	"github.com/schidstorm/scanner-tool/pkg/filequeue"
 	"github.com/schidstorm/scanner-tool/pkg/filesystem"
 	"github.com/sirupsen/logrus"
 )
 
 type UploadHandler struct {
-	cifs *filesystem.Cifs
+	cifs            *filesystem.Cifs
+	fileNameGuesser ai.FileNameGuesser
 }
 
 func (u *UploadHandler) WithCifs(cifs *filesystem.Cifs) *UploadHandler {
@@ -19,11 +22,63 @@ func (u *UploadHandler) WithCifs(cifs *filesystem.Cifs) *UploadHandler {
 	return u
 }
 
+func (u *UploadHandler) WithFileNameGuesser(fileNameGuesser ai.FileNameGuesser) *UploadHandler {
+	u.fileNameGuesser = fileNameGuesser
+	return u
+}
+
 func (u *UploadHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
-	fileName := fmt.Sprintf("%d_%d.pdf", time.Now().Unix(), time.Now().Nanosecond())
-	return u.cifs.UploadReader(fileName, file)
+	pdfData, err := io.ReadAll(file)
+	if err != nil {
+		logrus.Errorf("Failed to read file: %v", err)
+		return err
+	}
+
+	fileName, err := u.guessFileName(pdfData)
+	if err != nil {
+		logrus.Errorf("Failed to guess file name: %v", err)
+		return err
+	}
+	logrus.Infof("Uploading file %s to CIFS share", fileName)
+	return u.cifs.Upload(fileName, pdfData)
+}
+
+func (u *UploadHandler) guessFileName(pdfData []byte) (string, error) {
+	logrus.Info("Extracting text from PDF")
+	text, err := extractTextFromPdf(pdfData)
+	if err != nil {
+		logrus.Errorf("Failed to extract text from PDF: %v", err)
+		return "", err
+	}
+	logrus.Info("Guessing file name")
+	fileName, err := u.fileNameGuesser.Guess(text)
+	if err != nil {
+		logrus.Errorf("Failed to guess file name: %v", err)
+		return "", err
+	}
+	logrus.Infof("Guessed file name: %s", fileName)
+
+	return fileName, nil
 }
 
 func (u *UploadHandler) Close() error {
 	return nil
+}
+
+func extractTextFromPdf(pdfData []byte) (string, error) {
+	return pdfToText(pdfData)
+}
+
+func pdfToText(pdfData []byte) (string, error) {
+	cmd := exec.Command("pdftotext", "-", "-")
+	inBuffer := bytes.NewBuffer(pdfData)
+	outBuffer := &bytes.Buffer{}
+	cmd.Stdin = inBuffer
+	cmd.Stdout = outBuffer
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	return outBuffer.String(), nil
 }

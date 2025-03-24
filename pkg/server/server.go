@@ -1,14 +1,16 @@
 package server
 
 import (
+	"github.com/schidstorm/scanner-tool/pkg/ai"
 	"github.com/schidstorm/scanner-tool/pkg/filequeue"
 	"github.com/schidstorm/scanner-tool/pkg/filesystem"
 	"github.com/schidstorm/scanner-tool/pkg/scan"
 )
 
 type Options struct {
-	CifsOptions filesystem.Options `yaml:"cifsoptions"`
-	ScanOptions scan.Options       `yaml:"scanoptions"`
+	CifsOptions   filesystem.Options `yaml:"cifsoptions"`
+	ScanOptions   scan.Options       `yaml:"scanoptions"`
+	ChatGptApiKey string             `yaml:"chatgptapikey"`
 }
 
 type HttpOptions struct {
@@ -34,7 +36,7 @@ func NewServer(opts Options) *Server {
 		new(ImageMirrorHandler),
 		new(TesseractHandler),
 		new(MergeHandler),
-		new(UploadHandler).WithCifs(s.cifs),
+		new(UploadHandler).WithCifs(s.cifs).WithFileNameGuesser(ai.NewChatGPTFileNameGuesser(ai.NewChatGPTClient(s.options.ChatGptApiKey))),
 	})
 
 	return s
