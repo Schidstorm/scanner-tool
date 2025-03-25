@@ -16,6 +16,9 @@ trap cleanup EXIT
 epsonscan2FileName=$(basename $epsonscan2FileUrl)
 wget -O $WORK_DIR/$epsonscan2FileName "$epsonscan2FileUrl"
 
+# check sha256
+echo "e141e66e4cd74c06eef0baa163f4cc498c3be4a5db82851c914a1b7f2c50967e  $WORK_DIR/$epsonscan2FileName" | sha256sum --check
+
 # extract
 tar -xzf $WORK_DIR/$epsonscan2FileName -C $WORK_DIR
 srcPath=$(find $WORK_DIR -type d -name 'epsonscan2-*')
