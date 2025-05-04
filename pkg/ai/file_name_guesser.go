@@ -9,9 +9,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var instructions = "Please guess the file name based on the text. Put the filename in single quotes. The filename should be good for sorting and beginn with the date. Please do it in german."
-var retries = 3
-var retryTimeout = 5 * time.Second
+var filenameGuesserInstructions = "Please guess the file name based on the text. Put the filename in single quotes. The filename should be good for sorting and beginn with the date. Please do it in german."
+var filenameGuesserRetries = 3
+var filenameGuesserRetryTimeout = 5 * time.Second
 
 type FileNameGuesser interface {
 	Guess(text string) (string, error)
@@ -28,9 +28,9 @@ func NewChatGPTFileNameGuesser(client *ChatGPTClient) *ChatGPTFileNameGuesser {
 }
 
 func (g *ChatGPTFileNameGuesser) Guess(text string) (string, error) {
-	for i := range retries {
+	for i := range filenameGuesserRetries {
 		if i > 0 {
-			time.Sleep(retryTimeout)
+			time.Sleep(filenameGuesserRetryTimeout)
 		}
 
 		fileName, err := g.guess(text)
@@ -51,7 +51,7 @@ func (g *ChatGPTFileNameGuesser) Guess(text string) (string, error) {
 }
 
 func (g *ChatGPTFileNameGuesser) guess(text string) (string, error) {
-	resp, err := g.client.GenerateResponse(instructions, text)
+	resp, err := g.client.GenerateResponse(filenameGuesserInstructions, text)
 	if err != nil {
 		return "", err
 	}
