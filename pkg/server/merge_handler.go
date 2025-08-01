@@ -39,12 +39,25 @@ func (m *MergeHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outp
 
 	tmpMergedFileName := fmt.Sprintf("%d_%d.pdf", time.Now().Unix(), time.Now().Nanosecond())
 	tmpMergedFilePath := path.Join(os.TempDir(), tmpMergedFileName)
+
 	err = api.MergeCreateFile(tmpFiles, tmpMergedFilePath, false, model.NewDefaultConfiguration())
 	if err != nil {
 		return err
 	}
 
-	return outputQueue.EnqueueFilePath(tmpMergedFilePath)
+	zipBytes, err := os.ReadFile(tmpMergedFilePath)
+	if err != nil {
+		return err
+	}
+
+	ouputZipPath, err := createZipFileCreator().
+		AddFile("out.pdf", zipBytes).
+		Finalize()
+	if err != nil {
+		return err
+	}
+
+	return outputQueue.EnqueueFilePath(ouputZipPath)
 }
 
 func unpackAllFilesInZip(zipFile filequeue.QueueFile, destDir string) ([]string, error) {
