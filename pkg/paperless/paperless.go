@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -170,35 +171,113 @@ type tagResult struct {
 }
 
 type getTagsResult struct {
+	Next    *string     `json:"next"`
+	Count   int         `json:"count"`
 	Results []tagResult `json:"results"`
 }
 
-func (p *Paperless) createTagIfNotExist(tag string) (int, error) {
-	res, err := p.httpClient.Get(p.baseUrl + tagsUrl)
-	if err != nil {
-		return 0, err
+func (p *Paperless) GetTags() ([]tagResult, error) {
+	u := &url.URL{
+		Path: tagsUrl,
+	}
+	query := u.Query()
+	query.Add("page_size", "50")
+
+	var tags []tagResult
+	for i := 1; ; i++ {
+		var tagsResult getTagsResult
+
+		query.Set("page", strconv.Itoa(i))
+		u.RawQuery = query.Encode()
+		err := p.apiCallParsed("GET", *u, nil, &tagsResult)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tags: %v", err)
+		}
+		tags = append(tags, tagsResult.Results...)
+		if tagsResult.Next == nil {
+			break
+		}
 	}
 
-	if res.StatusCode != http.StatusOK {
-		if res.Body != nil {
-			body, _ := io.ReadAll(res.Body)
-			res.Body.Close()
-			return 0, fmt.Errorf("bad status: %s, body: %s", res.Status, string(body))
-		}
+	return tags, nil
+}
 
-		return 0, fmt.Errorf("bad status: %s", res.Status)
+func (p *Paperless) apiCallParsed(method string, url url.URL, body io.Reader, result interface{}) error {
+	res, err := p.apiCall(method, url, body)
+	if err != nil {
+		return err
 	}
 	defer res.Body.Close()
-	var tagsResult getTagsResult
-	err = json.NewDecoder(res.Body).Decode(&tagsResult)
-	if err != nil {
-		return 0, err
+	if res.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("bad status: %s, body: %s", res.Status, string(bodyBytes))
 	}
-	for _, tagResult := range tagsResult.Results {
+	err = json.NewDecoder(res.Body).Decode(result)
+	if err != nil {
+		return fmt.Errorf("failed to decode response: %v", err)
+	}
+	return nil
+}
+
+func (p *Paperless) apiCall(method string, u url.URL, body io.Reader) (*http.Response, error) {
+	baseUrlUrl, _ := url.Parse(p.baseUrl)
+	u.Host = baseUrlUrl.Host
+	u.Scheme = baseUrlUrl.Scheme
+
+	req, err := http.NewRequest(method, u.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.httpClient.Do(req)
+}
+
+func (p *Paperless) EditTag(tagID int, newName string) error {
+	if tagID <= 0 {
+		return fmt.Errorf("tag ID must be greater than 0")
+	}
+	if newName == "" {
+		return fmt.Errorf("new name is required")
+	}
+
+	tagUpdateUrl := fmt.Sprintf("%s%d/", p.baseUrl+tagsUrl, tagID)
+	updateData := map[string]string{"name": newName}
+	data, err := json.Marshal(updateData)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("PUT", tagUpdateUrl, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := p.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("bad status: %s, body: %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+func (p *Paperless) createTagIfNotExist(tag string) (int, error) {
+	tags, err := p.GetTags()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get tags: %v", err)
+	}
+
+	for _, tagResult := range tags {
 		if tagResult.ID == 0 {
 			continue
 		}
-		if tagResult.Name == tag {
+		if strings.ToLower(tagResult.Name) == tag {
 			return tagResult.ID, nil
 		}
 	}

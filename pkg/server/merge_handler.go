@@ -38,6 +38,7 @@ func (m *MergeHandler) Run(logger *logrus.Logger, input chan InputFile, outputFi
 
 	tmpMergedFileName := fmt.Sprintf("%d_%d.pdf", time.Now().Unix(), time.Now().Nanosecond())
 	tmpMergedFilePath := path.Join(os.TempDir(), tmpMergedFileName)
+	defer os.Remove(tmpMergedFilePath)
 
 	err = api.MergeCreateFile(tmpFiles, tmpMergedFilePath, false, model.NewDefaultConfiguration())
 	if err != nil {

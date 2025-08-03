@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"io"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/schidstorm/scanner-tool/pkg/paperless"
@@ -35,10 +37,18 @@ func (u *PaperlessUploadHandler) Run(logger *logrus.Logger, input chan InputFile
 		}
 
 		fileReader := bytes.NewReader(pdfData)
+		tags := strings.Split(f.Metadata()["tags"], ",")
+		tags = mapT(tags, strings.TrimSpace)
+		tags = mapT(tags, strings.ToLower)
+		sort.Strings(tags)
+		tags = slices.Compact(tags)
+		tags = filterT(tags, func(tag string) bool {
+			return tag != ""
+		})
 
 		err = u.paperless.Upload(fileReader, paperless.UploadOptions{
 			Title: f.FileInfo().Name(),
-			Tags:  strings.Split(f.Metadata()["tags"], ","),
+			Tags:  tags,
 		})
 
 		if err != nil {
@@ -48,6 +58,24 @@ func (u *PaperlessUploadHandler) Run(logger *logrus.Logger, input chan InputFile
 	}
 
 	return nil
+}
+
+func mapT[T any](input []T, mapper func(T) T) []T {
+	result := make([]T, len(input))
+	for i, v := range input {
+		result[i] = mapper(v)
+	}
+	return result
+}
+
+func filterT[T any](input []T, filter func(T) bool) []T {
+	result := make([]T, 0, len(input))
+	for _, v := range input {
+		if filter(v) {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 func (u *PaperlessUploadHandler) Close() error {
