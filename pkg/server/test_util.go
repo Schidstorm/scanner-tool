@@ -1,17 +1,16 @@
 package server
 
 import (
-	"archive/zip"
-	"io"
 	"os"
 	"testing"
 
 	"github.com/schidstorm/scanner-tool/pkg/filequeue"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/stretchr/testify/assert"
 )
 
-func prepareHandlerThings(t *testing.T, inoutFiles map[string][]byte, h func(file filequeue.QueueFile, outputQueue filequeue.Queue) error) map[string][]byte {
-	creator := createZipFileCreator()
+func prepareHandlerThings(t *testing.T, inoutFiles map[string][]byte, h func(input chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) error) map[string][]byte {
+	creator := queueoutputcreator.CreateZipFileWriter()
 
 	for fileName, data := range inoutFiles {
 		creator.AddFile(fileName, data)
@@ -23,27 +22,34 @@ func prepareHandlerThings(t *testing.T, inoutFiles map[string][]byte, h func(fil
 	zipData, err := os.ReadFile(zipFilePath)
 	assert.NoError(t, err)
 
-	file := &filequeue.MemQueryFile{
+	inputZipFile := &filequeue.MemQueryFile{
 		Name: "test.zip",
 		Data: zipData,
 	}
 
-	outputQueue := &filequeue.MemQueryFileQueue{}
-	err = h(file, outputQueue)
+	inputFiles := make(chan InputFile)
+	go func() {
+		defer close(inputFiles)
+		zipReader, err := queueoutputcreator.CreateZipFileReader(inputZipFile)
+		assert.NoError(t, err)
+		for _, fileName := range zipReader.FileNames() {
+			file, err := zipReader.GetFile(fileName)
+			assert.NoError(t, err)
+			inputFiles <- file
+		}
+	}()
+
+	outputZipCreator := queueoutputcreator.CreateMemZipFileCreator()
+
+	err = h(inputFiles, outputZipCreator)
 	assert.NoError(t, err)
 
 	assert.NoError(t, err)
-	assert.Equal(t, 1, len(outputQueue.Files))
+	assert.Equal(t, 1, len(outputZipCreator.Files()))
 
 	result := make(map[string][]byte)
-	forAllFilesInZip(&outputQueue.Files[0], func(f *zip.File) error {
-		readCloser, err := f.Open()
-		assert.NoError(t, err)
-		defer readCloser.Close()
-		imgData, err := io.ReadAll(readCloser)
-		assert.NoError(t, err)
-		result[f.Name] = imgData
-		return nil
-	})
+	for fileName, buf := range outputZipCreator.Files() {
+		result[fileName] = buf.Bytes()
+	}
 	return result
 }

@@ -1,11 +1,9 @@
 package server
 
 import (
-	"archive/zip"
-	"os"
 	"strings"
 
-	"github.com/schidstorm/scanner-tool/pkg/filequeue"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/schidstorm/scanner-tool/pkg/tesseract"
 	"github.com/sirupsen/logrus"
 )
@@ -13,38 +11,27 @@ import (
 type TesseractHandler struct {
 }
 
-func (t *TesseractHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
-	resultZipFile, err := os.CreateTemp("", "scanner-tool-*.zip")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(resultZipFile.Name())
-	defer resultZipFile.Close()
-
-	zipWriter := zip.NewWriter(resultZipFile)
-	defer zipWriter.Close()
-	err = forAllFilesInZip(file, func(f *zip.File) error {
+func (t *TesseractHandler) Run(logger *logrus.Logger, input chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) (resErr error) {
+	for f := range input {
 		text, err := fileToText(f)
 		if err != nil {
 			return err
 		}
 
 		if strings.Trim(text, " \n") == "" {
-			logger.Info("No text found in image. Skipping pdf conversion")
-			return nil
+			continue
 		}
 
-		return fileToPdf(f, zipWriter)
-	})
-	if err != nil {
-		return err
+		err = fileToPdf(f, outputFiles)
+		if err != nil {
+			return err
+		}
 	}
 
-	zipWriter.Close()
-	return outputQueue.EnqueueFilePath(resultZipFile.Name())
+	return nil
 }
 
-func fileToText(zipFile *zip.File) (string, error) {
+func fileToText(zipFile InputFile) (string, error) {
 	fileHandle, err := zipFile.Open()
 	if err != nil {
 		return "", err
@@ -54,17 +41,14 @@ func fileToText(zipFile *zip.File) (string, error) {
 	return tesseract.ConvertImageToText(fileHandle)
 }
 
-func fileToPdf(zipFile *zip.File, zipWriter *zip.Writer) error {
+func fileToPdf(zipFile InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) error {
 	fileHandle, err := zipFile.Open()
 	if err != nil {
 		return err
 	}
 	defer fileHandle.Close()
 
-	pdfWriter, err := zipWriter.Create(pdfFileName(zipFile.Name))
-	if err != nil {
-		return err
-	}
+	pdfWriter := outputFiles.OpenFile(pdfFileName(zipFile.FileInfo().Name()))
 
 	return tesseract.ConvertImageToPdf(fileHandle, pdfWriter)
 }

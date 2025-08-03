@@ -5,4 +5,5 @@ dist
 dist/
 
 /fakeImages
-.remote-compile-ssh.sh
+coverage.*
+remotes.txt

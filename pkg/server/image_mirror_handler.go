@@ -1,56 +1,51 @@
 package server
 
 import (
-	"archive/zip"
 	"image"
 	"image/png"
 
-	"github.com/schidstorm/scanner-tool/pkg/filequeue"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/sirupsen/logrus"
 )
 
 type ImageMirrorHandler struct {
 }
 
-func (i *ImageMirrorHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
-	zipFile := createZipFileCreator()
-
-	err := forAllFilesInZip(file, func(f *zip.File) error {
-		resultImage := mirrorImage(f)
-		if resultImage == nil {
-			return nil
-		}
-
-		file := zipFile.OpenFile(f.Name)
-		err := png.Encode(file, resultImage)
+func (i *ImageMirrorHandler) Run(logger *logrus.Logger, input chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) (resErr error) {
+	for f := range input {
+		img, err := readImage(f)
 		if err != nil {
+			logger.Errorf("Failed to read image from file %s: %v", f.FileInfo().Name(), err)
 			return err
 		}
 
-		return nil
-	})
-	if err != nil {
-		return err
+		resultImage := mirrorImage(img)
+		file := outputFiles.OpenFile(f.FileInfo().Name())
+		err = png.Encode(file, resultImage)
+		if err != nil {
+			return err
+		}
 	}
 
-	zipPath, err := zipFile.Finalize()
-	if err != nil {
-		return err
-	}
-	return outputQueue.EnqueueFilePath(zipPath)
+	return nil
 }
 
-func mirrorImage(f *zip.File) image.Image {
-	fileHandle, err := f.Open()
+func readImage(f InputFile) (image.Image, error) {
+	rc, err := f.Open()
 	if err != nil {
-		return nil
+		return nil, err
+	}
+	defer rc.Close()
+
+	img, err := png.Decode(rc)
+	if err != nil {
+		return nil, err
 	}
 
-	img, err := png.Decode(fileHandle)
-	if err != nil {
-		return nil
-	}
+	return img, nil
+}
 
+func mirrorImage(img image.Image) image.Image {
 	resultImage := image.NewRGBA(img.Bounds())
 	for y := 0; y < img.Bounds().Dy(); y++ {
 		for x := 0; x < img.Bounds().Dx(); x++ {

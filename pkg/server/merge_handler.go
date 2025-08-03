@@ -1,7 +1,6 @@
 package server
 
 import (
-	"archive/zip"
 	"fmt"
 	"io"
 	"os"
@@ -11,14 +10,14 @@ import (
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
-	"github.com/schidstorm/scanner-tool/pkg/filequeue"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/sirupsen/logrus"
 )
 
 type MergeHandler struct {
 }
 
-func (m *MergeHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) (resErr error) {
+func (m *MergeHandler) Run(logger *logrus.Logger, input chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) (resErr error) {
 	var tmpFiles []string
 	defer func() {
 		for _, tmpFile := range tmpFiles {
@@ -32,7 +31,7 @@ func (m *MergeHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outp
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tmpFiles, err = unpackAllFilesInZip(file, tmpDir)
+	tmpFiles, err = unpackAllFilesInZip(input, tmpDir)
 	if err != nil {
 		return err
 	}
@@ -50,46 +49,44 @@ func (m *MergeHandler) Run(logger *logrus.Logger, file filequeue.QueueFile, outp
 		return err
 	}
 
-	ouputZipPath, err := createZipFileCreator().
-		AddFile("out.pdf", zipBytes).
-		Finalize()
-	if err != nil {
-		return err
-	}
+	outputFiles.AddFile("out.pdf", zipBytes)
 
-	return outputQueue.EnqueueFilePath(ouputZipPath)
+	return nil
 }
 
-func unpackAllFilesInZip(zipFile filequeue.QueueFile, destDir string) ([]string, error) {
+func unpackAllFilesInZip(files chan InputFile, destDir string) ([]string, error) {
 	var tmpFiles []string
-	err := forAllFilesInZip(zipFile, func(f *zip.File) error {
+	var loopErr error
+	for f := range files {
 		fileHandle, err := f.Open()
 		if err != nil {
-			return err
+			loopErr = err
+			break
 		}
 		defer fileHandle.Close()
 
-		tmpFilePath := path.Join(destDir, f.Name)
+		tmpFilePath := path.Join(destDir, f.FileInfo().Name())
 		tmpFile, err := os.Create(tmpFilePath)
 		if err != nil {
-			return err
+			loopErr = err
+			break
 		}
 		defer tmpFile.Close()
 
 		_, err = io.Copy(tmpFile, fileHandle)
 		if err != nil {
-			return err
+			loopErr = err
+			break
 		}
 
 		tmpFiles = append(tmpFiles, tmpFilePath)
-		return nil
-	})
+	}
 
-	if err != nil {
+	if loopErr != nil {
 		for _, tmpFile := range tmpFiles {
 			os.Remove(tmpFile)
 		}
-		return nil, err
+		return nil, loopErr
 	}
 
 	sort.Strings(tmpFiles)

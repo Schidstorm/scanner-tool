@@ -1,20 +1,29 @@
 package server
 
 import (
+	"io"
+	"io/fs"
 	"reflect"
 	"sync"
 	"time"
 
 	"github.com/schidstorm/scanner-tool/pkg/filequeue"
 	"github.com/schidstorm/scanner-tool/pkg/logger"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/sirupsen/logrus"
 )
 
 var log = logger.Logger(Daemon{})
 var daemonScanWait = 5 * time.Second
 
+type InputFile interface {
+	Open() (io.ReadCloser, error)
+	FileInfo() fs.FileInfo
+	Metadata() map[string]string
+}
+
 type DaemonHandler interface {
-	Run(logger *logrus.Logger, file filequeue.QueueFile, outputQueue filequeue.Queue) error
+	Run(logger *logrus.Logger, input chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) error
 	Close() error
 }
 
@@ -105,7 +114,7 @@ func (d *Daemon) run(handler DaemonHandler, inputQueue, outputQueue filequeue.Qu
 	}
 }
 
-func (d *Daemon) runHandler(handler DaemonHandler, inputFile filequeue.QueueFile, outputQueue filequeue.Queue) {
+func (d *Daemon) runHandler(handler DaemonHandler, inputZipFile filequeue.QueueFile, outputQueue filequeue.Queue) {
 	handlerLogger := logger.Logger(handler)
 
 	defer func() {
@@ -114,11 +123,46 @@ func (d *Daemon) runHandler(handler DaemonHandler, inputFile filequeue.QueueFile
 		}
 	}()
 
-	err := handler.Run(handlerLogger, inputFile, outputQueue)
+	inputFiles := make(chan InputFile)
+	go func() {
+		defer close(inputFiles)
+		if inputZipFile != nil {
+			handlerLogger.Debug("Sending inputFile to handler")
+			zipReader, err := queueoutputcreator.CreateZipFileReader(inputZipFile)
+			if err != nil {
+				handlerLogger.WithError(err).Error("Failed to create zip reader")
+				inputFiles <- nil
+				return
+			}
+
+			for _, fileName := range zipReader.FileNames() {
+				f, err := zipReader.GetFile(fileName)
+				if err != nil {
+					handlerLogger.WithError(err).Errorf("Failed to get file %s from zip", fileName)
+					continue
+				}
+				inputFiles <- f
+			}
+		}
+	}()
+
+	outputFiles := queueoutputcreator.CreateZipFileWriter()
+
+	err := handler.Run(handlerLogger, inputFiles, outputFiles)
 	if err != nil {
 		handlerLogger.WithError(err).Error("Failed to run handler")
-	} else if inputFile != nil {
-		inputFile.Done()
+	} else if outputFiles.Error() != nil {
+		handlerLogger.WithError(outputFiles.Error()).Error("Failed to run handler")
+	} else {
+		if outputFiles.FileCount() > 0 {
+			outputZipPath, _ := outputFiles.Finalize()
+			handlerLogger.Debugf("Handler %s created %d files", handlerName(handler), outputFiles.FileCount())
+			outputQueue.EnqueueFilePath(outputZipPath)
+		}
+
+		if inputZipFile != nil {
+			inputZipFile.Done()
+		}
 	}
 }
 

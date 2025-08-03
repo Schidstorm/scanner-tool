@@ -3,9 +3,6 @@ package scan
 import (
 	"bytes"
 	"errors"
-	"image"
-	"image/png"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -81,31 +78,6 @@ func (s *SaneScanner) execScanimage() ([]string, error) {
 }
 
 // scanimage --format png --resolution 1200 --duplex=yes --batch --batch-print --device-name epsonscan2:DS-C490:584251413030303218:esci2:usb:ES0264:401
-
-func loadImage(imagePath string) (image.Image, error) {
-	file, err := os.Open(imagePath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	img, _, err := image.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
-}
-
-func saveImage(imagePath string, img image.Image) error {
-	file, err := os.Create(imagePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	return png.Encode(file, img)
-}
 
 func detectDeviceByProductName(productName string) (string, error) {
 	logrus.WithField("productName", productName).Info("Detecting device by product name")

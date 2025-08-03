@@ -1,12 +1,9 @@
 package server
 
 import (
-	"archive/zip"
-	"io"
 	"os"
-	"path"
 
-	"github.com/schidstorm/scanner-tool/pkg/filequeue"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/schidstorm/scanner-tool/pkg/scan"
 	"github.com/sirupsen/logrus"
 )
@@ -21,7 +18,7 @@ func (s *ScanHandler) WithScanner(scanner scan.Scanner) *ScanHandler {
 	return s
 }
 
-func (s *ScanHandler) Run(logger *logrus.Logger, _ filequeue.QueueFile, outputQueue filequeue.Queue) error {
+func (s *ScanHandler) Run(logger *logrus.Logger, _ chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) error {
 	imagePaths, err := s.scanner.Scan()
 	if err != nil {
 		return err
@@ -33,56 +30,20 @@ func (s *ScanHandler) Run(logger *logrus.Logger, _ filequeue.QueueFile, outputQu
 
 	logger.WithField("images", len(imagePaths)).WithField("files", imagePaths).Info("Scanned")
 
-	tmpZip, err := makeTmpZipFile(imagePaths)
-	if err != nil {
-		return err
-	}
-
-	outputQueue.EnqueueFilePath(tmpZip)
-	return nil
-}
-
-func makeTmpZipFile(contentFiles []string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "scanner-tool-*.zip")
-	if err != nil {
-		return "", err
-	}
-	defer tmpFile.Close()
-
-	err = zipFiles(tmpFile, contentFiles)
-	if err != nil {
-		os.Remove(tmpFile.Name())
-		return "", err
-	}
-
-	return tmpFile.Name(), nil
-}
-
-func zipFiles(zipFile *os.File, contentFiles []string) error {
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
-
-	for _, file := range contentFiles {
-		fileReader, err := os.Open(file)
+	for _, imagePath := range imagePaths {
+		rc, err := os.OpenFile(imagePath, os.O_RDONLY, 0o644)
 		if err != nil {
 			return err
 		}
-		defer fileReader.Close()
+		defer rc.Close()
 
-		fileContent, err := io.ReadAll(fileReader)
+		fileInfo, err := rc.Stat()
 		if err != nil {
 			return err
 		}
 
-		fileWriter, err := zipWriter.Create(path.Base(file))
-		if err != nil {
-			return err
-		}
-
-		_, err = fileWriter.Write(fileContent)
-		if err != nil {
-			return err
-		}
+		fileName := fileInfo.Name()
+		outputFiles.AddFileReader(fileName, rc)
 	}
 
 	return nil

@@ -1,36 +1,31 @@
+project = scanner-tool
+arch = $(shell /usr/local/go/bin/go env GOARCH)
 
-htmxUrl = https://unpkg.com/htmx.org@latest/dist/
-bootstrapUrl = https://api.github.com/repos/twbs/bootstrap/releases/latest
-scriptsDir = pkg/server/public
-remoteCompileSsh = .remote-compile-ssh.sh
+all: test build remote
 
-install: installDependencies
-	go install ./cmd/scanner-tool/ && \
-	sudo cp systemd/scanner-tool.service /etc/systemd/system/ && \
-	sudo systemctl daemon-reload && \
-	sudo systemctl enable scanner-tool && \
-	sudo systemctl restart scanner-tool
+test:
+	go test -v ./... -coverprofile=coverage.out && \
+	go tool cover -html=coverage.out -o coverage.html
 
-build: installDependencies
-	go build -o dist/scanner-tool ./cmd/scanner-tool/ 
+build: dependencies tidy build_arch
 
-remoteBuild:
-	bash $(remoteCompileSsh)
+dependencies:
+	sudo apt install -y tesseract-ocr libsane-dev
 
 tidy:
-	go mod tidy
+	/usr/local/go/bin/go mod tidy
 
-installDependencies:
-	sudo apt install -y tesseract-ocr libsane-dev libsane
+build_arch: test
+	mkdir -p dist && \
+	CGO_ENABLED=1 /usr/local/go/bin/go build -a -o dist/$(project)_$(arch) ./cmd/$(project)
 
-update: updateHtmx updateBootstrap
+remote:
+	bash remoteBuild.sh "$(shell cat remotes.txt)"
 
-updateHtmx:
-	curl -L -s --fail "$(htmxUrl)/htmx.min.js" > $(scriptsDir)/htmx.min.js
-
-updateBootstrap:
-	curl --fail -s -L $(bootstrapUrl) | jq -r '.assets[] | select(.name | endswith("dist.zip")) | .browser_download_url' \
-	| xargs -L1 curl --fail -s -L > download.zip && \
-	unzip -o -q -j download.zip '*/bootstrap.bundle.min.js*' '*/bootstrap.min.css*' -d $(scriptsDir) && \
-	rm download.zip
+install:
+	go install ./cmd/$(project)/ && \
+	sudo cp systemd/$(project).service /etc/systemd/system/ && \
+	sudo systemctl daemon-reload && \
+	sudo systemctl enable $(project) && \
+	sudo systemctl restart $(project)
 	

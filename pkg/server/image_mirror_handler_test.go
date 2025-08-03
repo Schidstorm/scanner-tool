@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"github.com/schidstorm/scanner-tool/pkg/filequeue"
+	queueoutputcreator "github.com/schidstorm/scanner-tool/pkg/queue_output_creator"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
@@ -18,9 +18,9 @@ func TestImageMirrorHandler(t *testing.T) {
 
 	resultFiles := prepareHandlerThings(t, map[string][]byte{
 		"normal.png": normalImageData,
-	}, func(file filequeue.QueueFile, outputQueue filequeue.Queue) error {
+	}, func(input chan InputFile, outputFiles queueoutputcreator.QueueZipFileWriter) error {
 		handler := &ImageMirrorHandler{}
-		return handler.Run(logrus.New(), file, outputQueue)
+		return handler.Run(logrus.New(), input, outputFiles)
 	})
 
 	assert.Equal(t, 1, len(resultFiles))
